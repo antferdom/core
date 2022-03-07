@@ -1,0 +1,47 @@
+@startuml
+
+hide empty members
+hide empty methods
+
+class Famapy
+abstract Model
+abstract Operation
+abstract Transformation
+class Plugin <<Metamodel>>
+class ValidProduct
+class CoreFeatures
+class Filter
+class TextToModel
+class ModelToText
+class ModelToModel
+
+class ModelImpl as "Model"
+class OperationImpl as "Operation"
+class TransformationImpl as "Transformation"
+
+Famapy *--> Core
+Famapy *--> "n" Plugin
+Famapy o--> PluginSkeletonGenerator
+Famapy o--> WebClient
+
+Core *--> Model
+Core *--> "n" Transformation
+Core *--> "n" Operation
+Core *--> DiscoverPlugin
+DiscoverPlugin ..> "search" Plugin
+
+Plugin *--> Name
+Plugin *--> Extension
+Plugin *--> ModelImpl
+Plugin *--> "n" OperationImpl
+Plugin *--> "n" TransformationImpl
+
+Transformation <|-- TextToModel
+Transformation <|-- ModelToText
+Transformation <|-- ModelToModel
+
+Operation <|-- ValidProduct
+Operation <|-- CoreFeatures
+Operation <|-- Filter
+
+@enduml

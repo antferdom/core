@@ -4,7 +4,7 @@ from queue import Queue
 from importlib import import_module
 from pkgutil import iter_modules
 from types import ModuleType
-from typing import Any, Optional, Type
+from typing import Any, Iterator, Optional, Type
 
 from famapy.core.config import PLUGIN_PATHS
 from famapy.core.exceptions import OperationNotFound
@@ -24,6 +24,9 @@ from famapy.core.transformations.model_to_model import ModelToModel
 LOGGER = logging.getLogger('discover')
 
 
+GraphBFS = dict[Type[ModelToModel], list[Type[ModelToModel]]]
+
+
 def filter_modules_from_plugin_paths() -> list[ModuleType]:
     results: list[ModuleType] = []
     for path in PLUGIN_PATHS:
@@ -33,6 +36,78 @@ def filter_modules_from_plugin_paths() -> list[ModuleType]:
         except ModuleNotFoundError:
             LOGGER.exception('ModuleNotFoundError %s', path)
     return results
+
+
+def filter_m2m(
+    m2m_list: list[Type[ModelToModel]],
+    input_extension: str,
+) -> Iterator[Type[ModelToModel]]:
+    return filter(lambda x: x.get_source_extension() == input_extension, m2m_list)
+
+
+def shortest_way_transformation(
+    m2m_transformations: list[Type[ModelToModel]],
+    input_extension: str,
+    output_extensions: list[str],
+) -> list[Type[ModelToModel]]:
+    """Use BFS (Breadth First Search) algorithm modified."""
+
+    parent = None
+    queue: Queue[Type[ModelToModel]] = Queue()
+    visited = set()
+    graph: GraphBFS = {}
+
+    # first loop search solution and/or first candidates
+    for m2m in filter_m2m(m2m_transformations, input_extension):
+        if m2m.get_destination_extension() in output_extensions:
+            return [m2m]
+
+        graph[m2m] = []
+        queue.put(m2m)
+        visited.add(m2m)
+
+    # loop search solution
+    solution_found = None
+    while 1:
+        if queue.empty():
+            break
+        parent = queue.get()
+
+        for m2m in filter_m2m(m2m_transformations, parent.get_destination_extension()):
+            if m2m in visited:
+                continue
+
+            graph[parent].append(m2m)
+            if m2m not in graph:
+                graph[m2m] = []
+
+            queue.put(m2m)
+            visited.add(m2m)
+            if m2m.get_destination_extension() in output_extensions:
+                solution_found = m2m
+                break
+
+    return calculate_solution_from_graph(graph, solution_found, input_extension)
+
+
+def calculate_solution_from_graph(
+    graph: GraphBFS,
+    solution_found: Type[ModelToModel],
+    input_extension: str,
+) -> list[Type[ModelToModel]]:
+
+    if solution_found is None:
+        raise NotImplementedError("Way to execute operation not found")
+
+    solution = [solution_found]
+    while solution[-1].get_source_extension() != input_extension:
+        for key, values in graph.items():
+            if solution[-1] in values:
+                solution.append(key)
+                break
+
+    solution.reverse()
+    return solution
 
 
 class DiscoverMetamodels:
@@ -213,7 +288,7 @@ class DiscoverMetamodels:
         self,
         plugin: Plugin,
         operation_name: str,
-    ) -> list[tuple[str, str]]:
+    ) -> list[Type[ModelToModel]]:
         """
         Search way to reach plugin with operation_name using m2m transformations
         """
@@ -224,66 +299,6 @@ class DiscoverMetamodels:
 
         input_extension = plugin.get_extension()
         output_extensions = [p.get_extension() for p in plugins_with_operation]
-        return self._shortest_way_transformation(
+        return shortest_way_transformation(
             m2m_transformations, input_extension, output_extensions
         )
-
-    def _shortest_way_transformation(
-        self,
-        m2m_transformations: list[ModelToModel],
-        input_extension: str,
-        output_extensions: list[str],
-    ) -> list[ModelToModel]:
-        """Use BFS (Breadth First Search) algorithm modified."""
-
-        parent = None
-        queue = Queue()
-        visited = set()
-        graph: dict[ModelToModel, list[ModelToModel]] = {}
-
-        # first loop search solution and/or first candidates
-        for m2m in self._filter_m2m(m2m_transformations, input_extension):
-            if m2m.get_destination_extension() in output_extensions:
-                return [m2m]
-
-            graph[m2m] = []
-            queue.put(m2m)
-            visited.add(m2m)
-
-        # loop search solution
-        solution_found = None
-        while 1:
-            if queue.empty():
-                break
-            parent = queue.get()
-
-            for m2m in self._filter_m2m(m2m_transformations, parent.get_destination_extension()):
-                if m2m in visited:
-                    continue
-
-                graph[parent].append(m2m)
-                if m2m not in graph:
-                    graph[m2m] = []
-
-                queue.put(m2m)
-                visited.add(m2m)
-                if m2m.get_destination_extension() in output_extensions:
-                    solution_found = m2m
-                    break
-
-        if solution_found is None:
-            raise NotImplementedError("Way to execute operation not found")
-
-        # calculate solution from graph
-        solution = [solution_found]
-        while solution[-1].get_source_extension() != input_extension:
-            for key, values in graph.items():
-                if solution[-1] in values:
-                    solution.append(key)
-                    break
-
-        solution.reverse()
-        return solution
-
-    def _filter_m2m(self, m2m_list: list[ModelToModel], input_extension: str):
-        return filter(lambda x: x.get_source_extension() == input_extension, m2m_list)

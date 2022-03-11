@@ -2,7 +2,7 @@ import pytest
 
 from famapy.core.transformations.model_to_model import ModelToModel
 from famapy.core.models.variability_model import VariabilityModel
-from famapy.core.discover import DiscoverMetamodels
+from famapy.core.discover import shortest_way_transformation
 
 
 def factory_model_to_model(src: str, dst: str) -> ModelToModel:
@@ -18,13 +18,8 @@ def factory_model_to_model(src: str, dst: str) -> ModelToModel:
         def __init__(self, source_model: VariabilityModel) -> None:
             pass
 
-        def __str__(self):
-            return (
-                f"{self.get_source_extension()} -> {self.get_destination_extension()}"
-            )
-
-        def __repr__(self):
-            return str(self)
+        def transform(self):
+            pass
 
     return M2M(None)
 
@@ -35,14 +30,14 @@ def test_transformation_way_shortest_no_solution(output_extensions):
     b_c = factory_model_to_model("B", "D")
     m2m_list = [a_b, b_c]
     with pytest.raises(NotImplementedError):
-        DiscoverMetamodels()._shortest_way_transformation(m2m_list, "A", output_extensions)
+        shortest_way_transformation(m2m_list, "A", output_extensions)
 
 
 @pytest.mark.parametrize('output_extensions', [["B"], ["B", "C"]])
 def test_transformation_way_shortest_easy(output_extensions):
     a_b = factory_model_to_model("A", "B")
     m2m_list = [a_b]
-    assert DiscoverMetamodels()._shortest_way_transformation(m2m_list, "A", output_extensions) == [a_b]
+    assert shortest_way_transformation(m2m_list, "A", output_extensions) == [a_b]
 
 
 @pytest.mark.parametrize('output_extensions', [["C"], ["E", "C"]])
@@ -50,7 +45,7 @@ def test_transformation_way_shortest_medium(output_extensions):
     a_b = factory_model_to_model("A", "B")
     b_c = factory_model_to_model("B", "C")
     m2m_list = [a_b, b_c]
-    assert DiscoverMetamodels()._shortest_way_transformation(m2m_list, "A", output_extensions) == [
+    assert shortest_way_transformation(m2m_list, "A", output_extensions) == [
         a_b,
         b_c,
     ]
@@ -69,6 +64,6 @@ def test_transformation_way_shortest_complex(output_extensions):
 
     m2m_list = [a_b, a_e, b_c, b_e, c_d, e_d, e_b, d_f]
 
-    assert DiscoverMetamodels()._shortest_way_transformation(m2m_list, "B", output_extensions) == [
+    assert shortest_way_transformation(m2m_list, "B", output_extensions) == [
         b_c, c_d, d_f
     ]

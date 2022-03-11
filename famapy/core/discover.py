@@ -1,5 +1,6 @@
 import inspect
 import logging
+from queue import Queue
 from importlib import import_module
 from pkgutil import iter_modules
 from types import ModuleType
@@ -170,7 +171,7 @@ class DiscoverMetamodels:
         self,
         operation_name: str,
         file: str,
-        plugin_name: Optional[str] = None
+        plugin_name: Optional[str] = None,
     ) -> Any:
 
         if operation_name not in self.get_name_operations():
@@ -181,19 +182,17 @@ class DiscoverMetamodels:
             vm_temp = plugin.use_transformation_t2m(file)
         else:
             vm_temp = self.__transform_to_model_from_file(file)
-            plugin = self.plugins.get_plugin_by_extension(
-                vm_temp.get_extension())
+            plugin = self.plugins.get_plugin_by_extension(vm_temp.get_extension())
 
             if operation_name not in self.get_name_operations_by_plugin(plugin.name):
                 transformation_way = self.__search_transformation_way(
-                    plugin, operation_name)
+                    plugin, operation_name
+                )
 
-                for (_, dst) in transformation_way:
-                    _plugin = self.plugins.get_plugin_by_extension(dst)
-                    vm_temp = _plugin.use_transformation_m2m(vm_temp, dst)
-                    plugin = _plugin
+                for m2m in transformation_way:
+                    vm_temp = m2m(vm_temp).transform()
 
-        operation = plugin.use_operation(operation_name, vm_temp)
+        operation = self.use_operation(src=vm_temp, operation=operation_name)
         return operation.get_result()
 
     def __transform_to_model_from_file(self, file: str) -> VariabilityModel:
@@ -213,47 +212,78 @@ class DiscoverMetamodels:
     def __search_transformation_way(
         self,
         plugin: Plugin,
-        operation_name: str
+        operation_name: str,
     ) -> list[tuple[str, str]]:
-        '''
+        """
         Search way to reach plugin with operation_name using m2m transformations
-        '''
-        way: list[tuple[str, str]] = []
+        """
 
         plugins_with_operation = self.get_plugins_with_operation(
             operation_name)
         m2m_transformations = self.get_transformations_m2m()
 
         input_extension = plugin.get_extension()
+        output_extensions = [p.get_extension() for p in plugins_with_operation]
+        return self._shortest_way_transformation(
+            m2m_transformations, input_extension, output_extensions
+        )
 
-        def __search_recursive_way(
-            input_extension: str,
-            output_extension: str,
-            tmp_way: list[tuple[str, str]]
-        ) -> list[tuple[str, str]]:
+    def _shortest_way_transformation(
+        self,
+        m2m_transformations: list[ModelToModel],
+        input_extension: str,
+        output_extensions: list[str],
+    ) -> list[ModelToModel]:
+        """Use BFS (Breadth First Search) algorithm modified."""
 
-            for m2m in m2m_transformations:
-                in_m2m = m2m.get_source_extension()
-                out_m2m = m2m.get_destination_extension()
+        parent = None
+        queue = Queue()
+        visited = set()
+        graph: dict[ModelToModel, list[ModelToModel]] = {}
 
-                if in_m2m == input_extension:
-                    _next = (in_m2m, out_m2m)
-                    if _next in tmp_way:
-                        continue
+        # first loop search solution and/or first candidates
+        for m2m in self._filter_m2m(m2m_transformations, input_extension):
+            if m2m.get_destination_extension() in output_extensions:
+                return [m2m]
 
-                    tmp_way.append(_next)
-                    if output_extension == out_m2m:
-                        return tmp_way
+            graph[m2m] = []
+            queue.put(m2m)
+            visited.add(m2m)
 
-                    return __search_recursive_way(out_m2m, output_extension, tmp_way)
+        # loop search solution
+        solution_found = None
+        while 1:
+            if queue.empty():
+                break
+            parent = queue.get()
 
-            return tmp_way
+            for m2m in self._filter_m2m(m2m_transformations, parent.get_destination_extension()):
+                if m2m in visited:
+                    continue
 
-        for _plugin in plugins_with_operation:
-            output_extension = _plugin.get_extension()
-            way = __search_recursive_way(input_extension, output_extension, [])
+                graph[parent].append(m2m)
+                if m2m not in graph:
+                    graph[m2m] = []
 
-            if way and output_extension == way[-1][1]:
-                return way
+                queue.put(m2m)
+                visited.add(m2m)
+                if m2m.get_destination_extension() in output_extensions:
+                    solution_found = m2m
+                    break
 
-        raise NotImplementedError('Way to execute operation not found')
+        if solution_found is None:
+            raise NotImplementedError("Way to execute operation not found")
+
+        # calculate solution from graph
+        solution = [solution_found]
+        while solution[-1].get_source_extension() != input_extension:
+            for key, values in graph.items():
+                if solution[-1] in values:
+                    solution.append(key)
+                    break
+
+        solution.reverse()
+        return solution
+
+    def _filter_m2m(self, m2m_list: list[ModelToModel], input_extension: str):
+        return filter(lambda x: x.get_source_extension() == input_extension, m2m_list)

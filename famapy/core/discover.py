@@ -92,7 +92,7 @@ def shortest_way_transformation(
 
 def calculate_solution_from_graph(
     graph: GraphBFS,
-    solution_found: Type[ModelToModel],
+    solution_found: Optional[Type[ModelToModel]],
     input_extension: str,
 ) -> list[Type[ModelToModel]]:
 
